@@ -316,7 +316,7 @@ if __name__ == '__main__':
                       distributed_backend='ddp' if args.num_gpus > 1 else None,
                       num_sanity_val_steps=1, #if args.num_gpus > 1 else 5,
                       # check_val_every_n_epoch = max(system.args.num_epochs//system.args.N_vis,1),
-                      val_check_interval=500,
+                      val_check_interval=5000,
                       benchmark=True,
                       precision=16 if args.use_amp else 32,
                       amp_level='O1')

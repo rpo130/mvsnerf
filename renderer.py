@@ -79,8 +79,9 @@ def raw2outputs(raw, z_vals, dists, white_bkgd=False, net_type='v2'):
     device = z_vals.device
 
     rgb = raw[..., :3] # [N_rays, N_samples, 3]
+    sigma = raw[..., 3]
 
-    alpha, weights, alpha_softmax = raw2alpha(raw[..., 3], dists, net_type)  # [N_rays, N_samples]
+    alpha, weights, alpha_softmax = raw2alpha(sigma, dists, net_type)  # [N_rays, N_samples]
     rgb_map = torch.sum(weights[..., None] * rgb, -2)  # [N_rays, 3]
     depth_map = torch.sum(weights * z_vals, -1)
 
@@ -89,7 +90,13 @@ def raw2outputs(raw, z_vals, dists, white_bkgd=False, net_type='v2'):
 
     if white_bkgd:
         rgb_map = rgb_map + (1. - acc_map[..., None])
-    return rgb_map, disp_map, acc_map, weights, depth_map, alpha
+
+    weights_threshold = torch.tensor(15, dtype=torch.float32, device=device).expand(sigma.shape)
+    weights_ge = torch.ge(raw[..., 3], weights_threshold).to(torch.uint8).to(device)
+    first_fit_index = torch.argmax(weights_ge, -1)
+    dexdepth_map = z_vals[torch.arange(len(first_fit_index)), first_fit_index]
+
+    return rgb_map, disp_map, acc_map, weights, depth_map, alpha, dexdepth_map
 
 
 
@@ -159,8 +166,8 @@ def rendering(args, pose_ref, rays_pts, rays_ndc, depth_candidates, rays_o, rays
 
     dists = depth2dist(depth_candidates, cos_angle)
     # dists = ndc2dist(rays_ndc)
-    rgb_map, disp_map, acc_map, weights, depth_map, alpha = raw2outputs(raw, depth_candidates, dists, white_bkgd,args.net_type)
-    ret = {}
+    rgb_map, disp_map, acc_map, weights, depth_map, alpha, dexdepth_map = raw2outputs(raw, depth_candidates, dists, white_bkgd,args.net_type)
+    ret = {'dexdepth_map': dexdepth_map}
 
     return rgb_map, input_feat, weights, depth_map, alpha, ret
 

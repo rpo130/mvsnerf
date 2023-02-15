@@ -20,7 +20,8 @@ class AvtDataset(Dataset):
         self.img_wh = (int(640*downsample),int(480*downsample))
         self.define_transforms()
 
-        # self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+
+        self.blender2opencv = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
         if not load_ref:
             self.read_meta()
 
@@ -58,7 +59,7 @@ class AvtDataset(Dataset):
         self.all_rgbs = []
         self.all_masks = []
         for frame in self.meta['frames']:
-            pose = np.array(frame['transform_matrix'])# @ self.blender2opencv
+            pose = np.array(frame['transform_matrix']) @ self.blender2opencv
             self.poses += [pose]
             c2w = torch.FloatTensor(pose)
 
@@ -96,7 +97,7 @@ class AvtDataset(Dataset):
 
         w, h = self.img_wh
         # focal = 0.5 * 800 / np.tan(0.5 * meta['camera_angle_x'])  # original focal length
-        focal = self.meta['fx']
+        focal = meta['fx']
         focal *= self.img_wh[0] / 640  # modify focal length to match size self.img_wh
 
         src_transform = T.Compose([
@@ -106,8 +107,8 @@ class AvtDataset(Dataset):
 
         # if do not specify source views, load index from pairing file
         if pair_idx is None:
-            aa = np.arange(len(self.meta['frames']))
-            train_list = aa
+            aa = np.arange(len(meta['frames']))
+            train_list = aa[[2,41,61]]
             pair_idx = train_list
             print(f'====> ref idx: {pair_idx}')
 
@@ -115,7 +116,7 @@ class AvtDataset(Dataset):
         intrinsics, c2ws, w2cs = [],[],[]
         for i,idx in enumerate(pair_idx):
             frame = meta['frames'][idx]
-            c2w = np.array(frame['transform_matrix']) #@ self.blender2opencv
+            c2w = np.array(frame['transform_matrix']) @ self.blender2opencv
             w2c = np.linalg.inv(c2w)
             c2ws.append(c2w)
             w2cs.append(w2c)
@@ -136,7 +137,8 @@ class AvtDataset(Dataset):
             img = Image.open(image_path)
             img = img.resize(self.img_wh, Image.LANCZOS)
             img = self.transform(img)  # (4, h, w)
-            img = img[:3] * img[-1:] + (1 - img[-1:])  # blend A to RGB
+            # img = img[:3] * img[-1:] + (1 - img[-1:])  # blend A to RGB
+            img = img[:3]
             imgs.append(src_transform(img))
 
         pose_source = {}
