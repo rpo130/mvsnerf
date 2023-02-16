@@ -15,9 +15,15 @@ class AvtDataset(Dataset):
         self.root_dir = args.datadir
         self.split = split
         downsample = args.imgScale_train if split=='train' else args.imgScale_test
-        assert int(640*downsample)%32 == 0 or int(480*downsample)%32 == 0, \
+        
+        self.wh = (640,480)
+        w,h = self.wh
+
+        assert int(w*downsample)%32 == 0 or int(h*downsample)%32 == 0, \
             f'image width is {int(640*downsample)}, it should be divisible by 32, you may need to modify the imgScale'
-        self.img_wh = (int(640*downsample),int(480*downsample))
+        
+
+        self.img_wh = (int(w*downsample),int(h*downsample))
         self.define_transforms()
 
 
@@ -31,26 +37,39 @@ class AvtDataset(Dataset):
         with open(os.path.join(self.root_dir, f"transforms.json"), 'r') as f:
             self.meta = json.load(f)
 
-        aa = np.arange(len(self.meta['frames']))
+        np.random.seed(1)
 
-        test_list = aa[::8]
-        train_list = aa
+        aa = np.arange(len(self.meta['frames']))
+        np.random.shuffle(aa)
+        train_list = aa[0:16]
+        test_list = aa[16:20]
+        
         self.img_idx = train_list if self.split=='train' else test_list
         self.meta['frames'] = [self.meta['frames'][idx] for idx in self.img_idx]
         print(f'===> {self.split}ing index: {self.img_idx}')
 
         w, h = self.img_wh
         # self.focal = 0.5 * 640 / np.tan(0.5 * self.meta['camera_angle_x'])  # original focal length
-        self.focal = self.meta['fx']
-        self.focal *= self.img_wh[0] / 640  # modify focal length to match size self.img_wh
+        self.focal_x = self.meta['fx']
+        self.focal_y = self.meta['fy']
+
+        self.focal_x *= self.img_wh[0] / self.wh[0]
+        self.focal_y *= self.img_wh[1] / self.wh[1]
+
+        self.focal = self.focal_x
+
+        self.cx = self.meta['cx']
+        self.cy = self.meta['cy']
+        self.cx *= self.img_wh[0] / self.wh[0]
+        self.cy *= self.img_wh[1] / self.wh[1]
 
         # bounds, common for all scenes
         self.near = 0.1
-        self.far = 3.0
+        self.far = 1
         self.bounds = np.array([self.near, self.far])
 
         # ray directions for all pixels, same for all images (same H, W, focal)
-        self.directions = get_ray_directions(h, w, [self.focal,self.focal])  # (h, w, 3)
+        self.directions = get_ray_directions(h, w, [self.focal_x,self.focal_y], [self.cx, self.cy])  # (h, w, 3)
 
 
         self.image_paths = []
@@ -70,7 +89,8 @@ class AvtDataset(Dataset):
             img = self.transform(img)  # (4, h, w)
             img = img.view(4, -1).permute(1, 0)  # (h*w, 4) RGBA
             self.all_masks += [img[:,-1:]>0]
-            img = img[:, :3] * img[:, -1:] + (1 - img[:, -1:])  # blend A to RGB
+            # img = img[:, :3] * img[:, -1:] + (1 - img[:, -1:])  # blend A to RGB
+            img = img[:, :3]
             self.all_rgbs += [img]
 
             rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
@@ -96,9 +116,20 @@ class AvtDataset(Dataset):
             meta = json.load(f)
 
         w, h = self.img_wh
-        # focal = 0.5 * 800 / np.tan(0.5 * meta['camera_angle_x'])  # original focal length
-        focal = meta['fx']
-        focal *= self.img_wh[0] / 640  # modify focal length to match size self.img_wh
+        # self.focal = 0.5 * 640 / np.tan(0.5 * self.meta['camera_angle_x'])  # original focal length
+        focal_x = meta['fx']
+        focal_y = meta['fy']
+
+        focal_x *= self.img_wh[0] / self.wh[0]
+        focal_y *= self.img_wh[1] / self.wh[1]
+
+        focal = focal_x
+
+        cx = meta['cx']
+        cy = meta['cy']
+        cx *= self.img_wh[0] / self.wh[0]
+        cy *= self.img_wh[1] / self.wh[1]
+
 
         src_transform = T.Compose([
             T.Normalize(mean=[0.485, 0.456, 0.406],
@@ -123,7 +154,7 @@ class AvtDataset(Dataset):
 
             # build proj mat from source views to ref view
             proj_mat_l = np.eye(4)
-            intrinsic = np.array([[focal, 0, w / 2], [0, focal, h / 2], [0, 0, 1]])
+            intrinsic = np.array([[focal_x, 0, cx], [0, focal_y, cy], [0, 0, 1]])
             intrinsics.append(intrinsic.copy())
             intrinsic[:2] = intrinsic[:2] / 4  # 4 times downscale in the feature space
             proj_mat_l[:3, :4] = intrinsic @ w2c[:3, :4]
@@ -146,7 +177,7 @@ class AvtDataset(Dataset):
         pose_source['w2cs'] = torch.from_numpy(np.stack(w2cs)).float().to(device)
         pose_source['intrinsics'] = torch.from_numpy(np.stack(intrinsics)).float().to(device)
 
-        near_far_source = [0.1,3.]
+        near_far_source = [0.1,1.]
         imgs = torch.stack(imgs).float().unsqueeze(0).to(device)
         proj_mats = torch.from_numpy(np.stack(proj_mats)[:,:3]).float().unsqueeze(0).to(device)
         return imgs, proj_mats, near_far_source, pose_source

@@ -91,8 +91,8 @@ def raw2outputs(raw, z_vals, dists, white_bkgd=False, net_type='v2'):
     if white_bkgd:
         rgb_map = rgb_map + (1. - acc_map[..., None])
 
-    weights_threshold = torch.tensor(15, dtype=torch.float32, device=device).expand(sigma.shape)
-    weights_ge = torch.ge(raw[..., 3], weights_threshold).to(torch.uint8).to(device)
+    # print(f'{torch.max(sigma)} {torch.min(sigma)} {torch.mean(sigma)}')
+    weights_ge = torch.ge(sigma, .5).to(torch.uint8).to(device)
     first_fit_index = torch.argmax(weights_ge, -1)
     dexdepth_map = z_vals[torch.arange(len(first_fit_index)), first_fit_index]
 
